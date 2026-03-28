@@ -1,4 +1,12 @@
+import sys
 import ply.lex as lex
+
+#Criando uma tupla chamada estados, isso vai servir para os comentarios em bloco e também para as Strings
+states = (
+    ("comment", "exclusive"),
+    ("string" , "exclusive"),   
+          )
+
 
 #Criando um dicionario que irá armazenar as palavras reservadas de cool e o valor será a versão maiuscula dessas palavras
 
@@ -10,7 +18,6 @@ reservadas = {
     'case' : 'CASE',
     'loop' : 'LOOP',
     'pool' : 'POOL',
-    'case' : 'CASE',
     'esac' : 'ESAC',
     'in': 'IN',
     'while' : 'WHILE',
@@ -34,7 +41,6 @@ tokens = [
     'CASE',
     'LOOP',
     'POOL',
-    'CASE',
     'ESAC',
     'IN',
     'WHILE',
@@ -70,9 +76,9 @@ tokens = [
     'SEMI',
     'DOT',
     'COMMA',
-    'LESSER',
-    'EQUAL'
-    'TILDE' #TIL ~ , EM COOL o til é usado para dizer que um número negativo, o sinal de menos serve somente para a operação de menos
+    'LESS',
+    'EQUAL',
+    'TILDE', #TIL ~ , EM COOL o til é usado para dizer que um número negativo, o sinal de menos serve somente para a operação de menos
     'AT' #ARROBA @, serve para chamar metodo do pai de um objeto
 ]
 
@@ -101,12 +107,17 @@ t_COLON  = r':'
 t_SEMI   = r';'
 t_DOT    = r'\.'   
 t_COMMA  = r','
+t_ignore = ' \t' #ignora espaços em branco e tabs
+t_comment_ignore = ''
+t_string_ignore = ''
+
 
 #Agora temos que criar funções para identificar tokens que não seguem o mesmo padrão dos anteriores
 
 #LEMBRETE IMPORTATE cool é Case insensitive, então se eu escrever as palavras chaves maiusculas, minusculas ou misturado, tanto faz para ele, só não podemos fazer isso para true e false, pois suas primeiras letras precisam ser minusculas
 
 def t_BOOL_CONST(t):
+    # REGEX: t[Rr][Uu][Ee]  |   f[Aa][lL][Ss][Ee]
     r't[Rr][Uu][Ee]|f[Aa][lL][Ss][Ee]' #Regex que tenta ler a palavra true ou false, sendo que a primeira letra é sempre minuscula e as outras podem ser ou nao
 
     palavra = t.value.lower()
@@ -139,3 +150,126 @@ def t_OBJECTID(t): #OBJECT ID obrigatoriamente começa com letras MINUSCULAS
     t.type = reservadas.get(palavra, "OBJECTID")
     return t
 
+
+
+def t_newline(t):
+    r'\n+'  #Vendo se existe quebra de linhas
+
+    # t.lexer.lineno é o contador de linhas do ply
+    t.lexer.lineno += len(t.value) #Adicionando no contador de linhas a quantidade de quebras de linhas
+    pass #NÃO RETORNA NADA
+
+
+def t_error(t):
+    print(f"Caractere inválido {t.value[0]} na linha {t.lexer.lineno}")
+    t.lexer.skip(1) #Pula para o proximo caracter
+
+
+def t_COMMENT_LINE(t):
+    r'--.*' #Em regex, o ponto (.) significa que podemos receber QUALQUER coisa, só não dá para reconhecer \n
+    pass #Vai ignorar o bloco de comentarios inteiro
+
+def t_start_string(t):
+    r'\"'
+
+    t.lexer.string_buf = ""
+    t.lexer.begin('string')
+
+def t_string_fechar(t):
+    r'\"'
+
+    t.value =  t.lexer.string_buf
+    t.type = 'STR_CONST'
+    t.lexer.begin('INITIAL')
+    return t
+
+def t_string_chars(t):
+    r'[^\"\n]+' #Qualquer coisa que não seja " ou quebra de linha
+
+    t.lexer.string_buf += t.value
+
+def t_string_newline(t):
+    r'\n+'
+
+    print(f"Erro: String não fechada na linha {t.lexer.lineno}")
+    t.lexer.lineno += len(t.value)
+    t.lexer.begin('INITIAL')
+
+def t_string_error(t): 
+        t.lexer.skip(1)
+
+
+
+def t_start_comment(t):
+    r'\(\*'
+
+    t.lexer.comment_level = 1
+    t.lexer.begin('comment')
+
+def t_comment_abrir(t):
+    r'\(\*'
+
+    t.lexer.comment_level +=1
+
+def t_comment_fechar(t):
+    r'\*\)'
+
+    t.lexer.comment_level -= 1
+
+    if t.lexer.comment_level == 0:
+        t.lexer.begin('INITIAL')
+
+def t_comment_newline(t):
+    r'\n+'
+
+    t.lexer.lineno += len(t.value) 
+    pass 
+
+
+def t_comment_error(t):
+    t.lexer.skip(1)
+
+
+#EXECUTANDO LEXER
+
+
+codigo_cool_teste = """
+class TesteLexico inherits Object {
+    texto_sucesso : String <- "Ola Mundo, lexer funcionando!";
+    
+    (* Comentário (*de *)bloco *)
+    numero : Int <- 100;
+    teste_bool : Bool <- fAlSe;
+    
+    texto_falha : String <- "Esqueci de fechar a aspa
+    ?
+};
+"""
+
+lexer = lex.lex()
+
+if len(sys.argv)> 1:
+    nome_arquivo = sys.argv[1]
+
+    if not nome_arquivo.endswith('.cl'):
+        print(f'ERRO: Arquivo recebido não é do tipo .cl')
+        sys.exit(1)
+
+    print(f'LENDO O SEGUINTE ARQUIVO: {nome_arquivo}')
+    try:
+        with open(nome_arquivo, 'r') as arq:
+            dados = arq.read()
+            lexer.input(dados)
+    except FileNotFoundError:
+        print(f"Arquivo {nome_arquivo} não encontrado")
+        sys.exit(1)
+else:
+    lexer.input(codigo_cool_teste)
+
+
+while True:
+    tok = lexer.token()
+    if not tok:
+        break
+
+    print(tok)
