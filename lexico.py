@@ -116,26 +116,14 @@ t_string_ignore = ''
 
 #LEMBRETE IMPORTATE cool é Case insensitive, então se eu escrever as palavras chaves maiusculas, minusculas ou misturado, tanto faz para ele, só não podemos fazer isso para true e false, pois suas primeiras letras precisam ser minusculas
 
-def t_BOOL_CONST(t):
-    # REGEX: t[Rr][Uu][Ee]  |   f[Aa][lL][Ss][Ee]
-    r't[Rr][Uu][Ee]|f[Aa][lL][Ss][Ee]' #Regex que tenta ler a palavra true ou false, sendo que a primeira letra é sempre minuscula e as outras podem ser ou nao
-
-    palavra = t.value.lower()
-    if palavra == 'true':
-        t.value = True
-    else:
-        t.value = False
-    return t
 
 def t_INT_CONST(t):
     r'\d+'
-
     t.value = int(t.value) #transformando a string númerica em int 
     return t
 
 def t_TYPEID(t): #TYPE ID obrigatoriamente começa com letras maiusculas
     r'[A-Z][A-Za-z0-9_]*'
-
     #Verificando se as letras lidas formam alguma palavra reservada, se não formar, type vai ser TYPE_ID
     palavra = t.value.lower()
     t.type = reservadas.get(palavra, "TYPEID")
@@ -144,17 +132,23 @@ def t_TYPEID(t): #TYPE ID obrigatoriamente começa com letras maiusculas
 
 def t_OBJECTID(t): #OBJECT ID obrigatoriamente começa com letras MINUSCULAS
     r'[a-z][A-Za-z0-9_]*'
-
-    #Verificando se as letras lidas formam alguma palavra reservada, se não formar, type vai ser TYPE_ID
     palavra = t.value.lower()
-    t.type = reservadas.get(palavra, "OBJECTID")
+    #Verificando se a palavra formada é true ou false, pois se forem, serão do tipo Bool_Const
+    if palavra == 'true':
+        t.type  = 'BOOL_CONST'
+        t.value = True
+    elif palavra == 'false':
+        t.type  = 'BOOL_CONST'
+        t.value = False
+    else: #Verificando se as letras lidas formam alguma palavra reservada, se não formar, type vai ser OBJECTID_ID
+        t.type = reservadas.get(palavra, 'OBJECTID')
     return t
+
 
 
 
 def t_newline(t):
     r'\n+'  #Vendo se existe quebra de linhas
-
     # t.lexer.lineno é o contador de linhas do ply
     t.lexer.lineno += len(t.value) #Adicionando no contador de linhas a quantidade de quebras de linhas
     pass #NÃO RETORNA NADA
@@ -169,28 +163,44 @@ def t_COMMENT_LINE(t):
     r'--.*' #Em regex, o ponto (.) significa que podemos receber QUALQUER coisa, só não dá para reconhecer \n
     pass #Vai ignorar o bloco de comentarios inteiro
 
+#Tratando Strings
+
 def t_start_string(t):
     r'\"'
-
-    t.lexer.string_buf = ""
-    t.lexer.begin('string')
+    t.lexer.string_buf = "" #eSSE BUF VAI ARMAZENAR A STRING QUE ESTA SENDO FROMADA
+    t.lexer.begin('string') #INDO PARA O ESTADO DE STRING
 
 def t_string_fechar(t):
     r'\"'
-
-    t.value =  t.lexer.string_buf
+    t.value =  t.lexer.string_buf #quando a string fecha eu adiciono a palavra formada no buffer no t.value
     t.type = 'STR_CONST'
     t.lexer.begin('INITIAL')
     return t
 
 def t_string_chars(t):
-    r'[^\"\n]+' #Qualquer coisa que não seja " ou quebra de linha
+    #regex: \\.  |  [^\"\\\n]+ , reconhece  \ e qualquer letra que venha depois, também  reconhece qualquer coisa que não seja contra-barra, aspas ou quebra de linha
+    #  o primeiro caso espera realmente que seja escrito \n, o segundo não aceita que o enter seja pressionado, gerando um outrro tipo de \n
+    r'\\.|[^\"\\\n]+'
 
-    t.lexer.string_buf += t.value
+    if t.value.startswith('\\'): #verificando se estamos no caso 1
+        char = t.value[1]
+        tabela = { #tabela de escapes validos em cool
+            'n':  '\n',
+            't':  '\t',
+            '\\': '\\',
+            '"':  '"',
+            'b':  '\b',
+            'f':  '\f',
+        }
+        # se não conhecer o escape, vai usar o próprio char, por exemplo \z vai ser só z
+        t.lexer.string_buf += tabela.get(char, char)
+    else:
+        # caractere normal, adiciona direto
+        t.lexer.string_buf += t.value
+
 
 def t_string_newline(t):
     r'\n+'
-
     print(f"Erro: String não fechada na linha {t.lexer.lineno}")
     t.lexer.lineno += len(t.value)
     t.lexer.begin('INITIAL')
@@ -198,22 +208,19 @@ def t_string_newline(t):
 def t_string_error(t): 
         t.lexer.skip(1)
 
-
+#Tratando comentários de bloco
 
 def t_start_comment(t):
     r'\(\*'
-
     t.lexer.comment_level = 1
     t.lexer.begin('comment')
 
 def t_comment_abrir(t):
     r'\(\*'
-
     t.lexer.comment_level +=1
 
 def t_comment_fechar(t):
     r'\*\)'
-
     t.lexer.comment_level -= 1
 
     if t.lexer.comment_level == 0:
@@ -221,10 +228,12 @@ def t_comment_fechar(t):
 
 def t_comment_newline(t):
     r'\n+'
-
     t.lexer.lineno += len(t.value) 
     pass 
 
+def t_comment_chars(t):
+    r'[^\(\*\n]+' # Consome tudo que não seja (, *, ) ou quebra de linha de uma vez
+    pass          
 
 def t_comment_error(t):
     t.lexer.skip(1)
@@ -233,13 +242,14 @@ def t_comment_error(t):
 #EXECUTANDO LEXER
 
 
+#Codigo de teste para caso não seja passado nada por parametro
 codigo_cool_teste = """
 class TesteLexico inherits Object {
     texto_sucesso : String <- "Ola Mundo, lexer funcionando!";
     
     (* Comentário (*de *)bloco *)
     numero : Int <- 100;
-    teste_bool : Bool <- fAlSe;
+    trueColor : Bool <- fAlSe;
     
     texto_falha : String <- "Esqueci de fechar a aspa
     ?
@@ -248,6 +258,7 @@ class TesteLexico inherits Object {
 
 lexer = lex.lex()
 
+#Verificando arquivo passado por parametro
 if len(sys.argv)> 1:
     nome_arquivo = sys.argv[1]
 
@@ -266,10 +277,9 @@ if len(sys.argv)> 1:
 else:
     lexer.input(codigo_cool_teste)
 
-
+#Gerando tokens
 while True:
     tok = lexer.token()
     if not tok:
         break
-
     print(tok)
